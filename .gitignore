@@ -1,0 +1,32 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Data and experiment outputs
+data/raw/
+data/processed/
+results/
+BasicMotions/
+Epilepsy/
+UCI/
+
+# Notebook and logs
+.ipynb_checkpoints/
+*.log

@@ -1,0 +1,195 @@
+# =============================================================================
+# Phase 2 Configuration: UCI Daily and Sports Activities Dataset
+# Addresses RQ2 (graph strategy at higher dimensionality) and RQ3 (generalization)
+# =============================================================================
+
+defaults: "default.yaml"
+
+phase: 2
+description: >
+  Phase 2 uses the UCI Daily and Sports Activities dataset (45-variate,
+  5 sensor units on torso, arms, and legs). The predefined graph represents
+  anatomically meaningful body-segment connections, providing a physically
+  grounded relational structure. This higher-dimensional setting directly
+  addresses RQ3 by testing whether Phase 1 findings generalise, and provides
+  the strongest test of RQ2 since the predefined graph carries substantial
+  domain knowledge.
+
+# ---- Dataset ----
+datasets:
+  DSA:
+    source: "uci"
+    url: "https://archive.ics.uci.edu/static/public/256/daily+and+sports+activities.zip"
+    num_variables: 45
+    num_classes: 19
+    num_subjects: 8
+    segments_per_activity_per_subject: 60
+    total_instances: 9120         # 19 * 8 * 60
+    sequence_length: 125          # 5 seconds at 25 Hz
+    sampling_rate: 25             # Hz
+    split_strategy: "loso"        # Leave-One-Subject-Out cross-validation
+    description: >
+      5 body-worn sensor units (torso, right arm, left arm, right leg, left leg),
+      each with 9 channels (3-axis acc, 3-axis gyro, 3-axis mag) = 45 variables.
+      19 daily/sports activities, 8 subjects, 60 segments each.
+
+    # Sensor layout
+    sensor_units:
+      - name: "torso"
+        position: "T"
+        channels: ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z", "mag_x", "mag_y", "mag_z"]
+        variable_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+      - name: "right_arm"
+        position: "RA"
+        channels: ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z", "mag_x", "mag_y", "mag_z"]
+        variable_indices: [9, 10, 11, 12, 13, 14, 15, 16, 17]
+
+      - name: "left_arm"
+        position: "LA"
+        channels: ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z", "mag_x", "mag_y", "mag_z"]
+        variable_indices: [18, 19, 20, 21, 22, 23, 24, 25, 26]
+
+      - name: "right_leg"
+        position: "RL"
+        channels: ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z", "mag_x", "mag_y", "mag_z"]
+        variable_indices: [27, 28, 29, 30, 31, 32, 33, 34, 35]
+
+      - name: "left_leg"
+        position: "LL"
+        channels: ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z", "mag_x", "mag_y", "mag_z"]
+        variable_indices: [36, 37, 38, 39, 40, 41, 42, 43, 44]
+
+    # Activity labels
+    activities:
+      1: "sitting"
+      2: "standing"
+      3: "lying_on_back"
+      4: "lying_on_right"
+      5: "ascending_stairs"
+      6: "descending_stairs"
+      7: "standing_in_elevator"
+      8: "moving_in_elevator"
+      9: "walking_in_parking"
+      10: "walking_on_treadmill_flat"
+      11: "walking_on_treadmill_incline"
+      12: "running_on_treadmill"
+      13: "exercising_on_stepper"
+      14: "exercising_on_cross_trainer"
+      15: "cycling_horizontal"
+      16: "cycling_vertical"
+      17: "rowing"
+      18: "jumping"
+      19: "playing_basketball"
+
+# ---- Graph Construction for Phase 2 ----
+graphs:
+  DSA:
+    # ---------- Predefined: Anatomical body-segment graph ----------
+    # Two granularity levels:
+    predefined:
+      # Level 1: Coarse body-segment graph (5 nodes)
+      coarse:
+        adjacency_type: "anatomical"
+        num_nodes: 5
+        nodes: ["Torso", "RightArm", "LeftArm", "RightLeg", "LeftLeg"]
+        node_features: 9           # Each node has 9 sensor channels
+        edges:
+          # Torso is connected to all limbs (central hub)
+          - [0, 1]  # Torso - RightArm
+          - [0, 2]  # Torso - LeftArm
+          - [0, 3]  # Torso - RightLeg
+          - [0, 4]  # Torso - LeftLeg
+          # Bilateral symmetry connections
+          - [1, 2]  # RightArm - LeftArm
+          - [3, 4]  # RightLeg - LeftLeg
+        description: >
+          Each body segment is a single node with 9 features (acc+gyro+mag).
+          Edges encode anatomical adjacency through joints.
+
+      # Level 2: Fine-grained channel graph (45 nodes)
+      fine:
+        adjacency_type: "sensor_channel"
+        num_nodes: 45
+        node_features: 1           # Each channel is a separate node
+        edge_types:
+          # Intra-unit: all 9 channels within same sensor unit are connected
+          intra_unit_connectivity: "full"
+          # Inter-unit: corresponding channels between anatomically adjacent units
+          inter_unit_connectivity: "same_channel_anatomical"
+        description: >
+          Each sensor channel is a node. Intra-unit edges connect all channels
+          of the same body segment. Inter-unit edges connect matching channels
+          between anatomically adjacent segments.
+
+    # ---------- Adaptive ----------
+    adaptive:
+      embed_dim: 32
+      sparsity_threshold: 0.1
+      # For coarse graph (5 nodes)
+      coarse:
+        num_nodes: 5
+        node_features: 9
+      # For fine-grained graph (45 nodes)
+      fine:
+        num_nodes: 45
+        node_features: 1
+
+# ---- Models to evaluate in Phase 2 ----
+models_to_run:
+  baselines: ["lstm", "tcn", "transformer"]
+  tgnns: ["gconv_lstm", "gconv_gru", "a3tgcn", "dcrnn"]
+  graph_modes: ["predefined_coarse", "predefined_fine", "adaptive"]
+  # For each TGNN, run with predefined coarse, predefined fine, and adaptive
+
+# ---- Phase 2 specific training overrides ----
+training:
+  batch_size: 64
+  epochs: 150
+  patience: 25
+  learning_rate: 0.0005
+  scheduler_params:
+    T_max: 150
+    eta_min: 0.000005
+
+# ---- Phase 2 specific model overrides (more capacity for 45-dim input) ----
+models:
+  lstm:
+    hidden_dim: 256
+    num_layers: 2
+    dropout: 0.3
+
+  tcn:
+    num_channels: [128, 256, 256]
+    kernel_size: 3
+    dropout: 0.2
+
+  transformer:
+    d_model: 256
+    nhead: 8
+    num_layers: 4
+    dim_feedforward: 512
+    dropout: 0.1
+
+  gconv_lstm:
+    hidden_dim: 128
+    K: 3
+    num_layers: 2
+    dropout: 0.3
+
+  gconv_gru:
+    hidden_dim: 128
+    K: 3
+    num_layers: 2
+    dropout: 0.3
+
+  a3tgcn:
+    hidden_dim: 128
+    periods: 1
+    dropout: 0.3
+
+  dcrnn:
+    hidden_dim: 128
+    K: 3
+    num_layers: 2
+    dropout: 0.3

@@ -1,0 +1,94 @@
+# =============================================================================
+# Phase 1 Configuration: UEA Benchmark Datasets
+# Addresses RQ1 (TGNN vs baselines) and RQ2 (graph construction strategies)
+# =============================================================================
+
+# Inherit defaults
+defaults: "default.yaml"
+
+phase: 1
+description: >
+  Phase 1 evaluates TGNNs and baselines on BasicMotions (6-variate, single
+  wrist sensor) and Epilepsy (3-variate, single wrist sensor). The graph
+  connects individual sensor axes rather than spatially separated body
+  locations. This phase serves as a baseline where structural information
+  is limited, addressing RQ1 and providing a low-complexity reference for RQ3.
+
+# ---- Datasets ----
+datasets:
+  BasicMotions:
+    source: "uea"
+    num_variables: 6
+    num_classes: 4
+    num_instances: 80            # 40 train + 40 test (predefined split)
+    sequence_length: 100
+    split_strategy: "predefined" # UEA provides train/test split
+    validation_fraction: 0.2     # From training set
+    description: >
+      6 axes of motion data from a single wrist-worn sensor.
+      Activities: standing, walking, running, badminton.
+
+  Epilepsy:
+    source: "uea"
+    num_variables: 3
+    num_classes: 4
+    num_instances: 275           # 137 train + 138 test
+    sequence_length: 206
+    split_strategy: "predefined"
+    validation_fraction: 0.2
+    description: >
+      3-axis accelerometer from a wrist-worn sensor.
+      Activities: walking, running, sawing, seizure mimicking.
+
+# ---- Graph Construction for Phase 1 ----
+graphs:
+  BasicMotions:
+    predefined:
+      # 6 nodes: AccX, AccY, AccZ, GyroX, GyroY, GyroZ
+      # Edges: (1) within-sensor-type: Acc axes fully connected, Gyro axes fully connected
+      #        (2) cross-type same-axis: AccX-GyroX, AccY-GyroY, AccZ-GyroZ
+      adjacency_type: "sensor_axis"
+      nodes: ["AccX", "AccY", "AccZ", "GyroX", "GyroY", "GyroZ"]
+      edges:
+        # Intra-sensor-type connections (same physical quantity)
+        - [0, 1]  # AccX - AccY
+        - [0, 2]  # AccX - AccZ
+        - [1, 2]  # AccY - AccZ
+        - [3, 4]  # GyroX - GyroY
+        - [3, 5]  # GyroX - GyroZ
+        - [4, 5]  # GyroY - GyroZ
+        # Cross-type same-axis connections
+        - [0, 3]  # AccX - GyroX
+        - [1, 4]  # AccY - GyroY
+        - [2, 5]  # AccZ - GyroZ
+
+    adaptive:
+      embed_dim: 8
+      sparsity_threshold: 0.05
+
+  Epilepsy:
+    predefined:
+      # 3 nodes: AccX, AccY, AccZ (single accelerometer)
+      # Fully connected since all axes from same sensor
+      adjacency_type: "full"
+      nodes: ["AccX", "AccY", "AccZ"]
+      edges:
+        - [0, 1]
+        - [0, 2]
+        - [1, 2]
+
+    adaptive:
+      embed_dim: 8
+      sparsity_threshold: 0.05
+
+# ---- Models to evaluate in Phase 1 ----
+models_to_run:
+  baselines: ["lstm", "tcn", "transformer"]
+  tgnns: ["gconv_lstm", "gconv_gru", "a3tgcn", "dcrnn"]
+  graph_modes: ["predefined", "adaptive"]  # For each TGNN, run both strategies
+
+# ---- Phase 1 specific training overrides ----
+training:
+  batch_size: 16                # Smaller datasets → smaller batches
+  epochs: 300                   # More epochs for small datasets
+  patience: 40

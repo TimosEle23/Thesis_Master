@@ -1,0 +1,118 @@
+# =============================================================================
+# Default Configuration for TGNN Benchmark
+# Master's Thesis: Temporal Graph Neural Networks for MTS Classification
+# =============================================================================
+
+# ---- Research Questions Mapping ----
+# RQ1: TGNN vs baselines on UEA (Phase 1) → accuracy, F1, compute cost
+# RQ2: Predefined vs adaptive graph construction → across all datasets
+# RQ3: Phase 1 findings vs Phase 2 (higher-dim DSA dataset) → generalization
+
+# ---- Experiment settings ----
+experiment:
+  seed: 42
+  num_seeds: 5                  # Run each config with 5 seeds for statistical robustness
+  seeds: [42, 123, 456, 789, 1024]
+  device: "cpu"                 # auto | cpu | cuda | mps
+  num_workers: 4
+  pin_memory: true
+  deterministic: true
+
+# ---- Training ----
+training:
+  epochs: 200
+  patience: 30                  # Early stopping patience
+  min_delta: 0.001              # Minimum improvement for early stopping
+  batch_size: 32
+  optimizer: "adam"
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  scheduler: "cosine"           # cosine | step | plateau | none
+  scheduler_params:
+    T_max: 200
+    eta_min: 0.00001
+  gradient_clip_val: 1.0
+  label_smoothing: 0.0
+
+# ---- Model defaults ----
+models:
+  lstm:
+    hidden_dim: 128
+    num_layers: 2
+    dropout: 0.3
+    bidirectional: false
+
+  tcn:
+    num_channels: [64, 128, 128]
+    kernel_size: 3
+    dropout: 0.2
+
+  transformer:
+    d_model: 128
+    nhead: 8
+    num_layers: 3
+    dim_feedforward: 256
+    dropout: 0.1
+    positional_encoding: "sinusoidal"  # sinusoidal | learnable
+
+  # -- TGNN architectures --
+  gconv_lstm:
+    hidden_dim: 64
+    K: 2                        # Chebyshev filter size
+    num_layers: 2
+    dropout: 0.3
+
+  gconv_gru:
+    hidden_dim: 64
+    K: 2
+    num_layers: 2
+    dropout: 0.3
+
+  a3tgcn:
+    hidden_dim: 64
+    periods: 1
+    dropout: 0.3
+
+  dcrnn:
+    hidden_dim: 64
+    K: 2
+    num_layers: 2
+    dropout: 0.3
+
+  astgcn:
+    hidden_dim: 64
+    K: 3
+    num_blocks: 2
+    dropout: 0.3
+
+# ---- Graph construction ----
+graph:
+  # Predefined strategies
+  predefined:
+    type: "domain"              # domain | full | identity | correlation
+    normalize: true
+    self_loops: true
+
+  # Adaptive (learned) strategies
+  adaptive:
+    type: "learned"             # learned | attention
+    init: "random"              # random | identity | correlation_init
+    embed_dim: 16               # Node embedding dimension for learned adjacency
+    sparsity_threshold: 0.1     # Threshold for pruning weak edges
+    symmetric: true             # Force symmetric adjacency
+
+# ---- Evaluation ----
+evaluation:
+  metrics: ["accuracy", "macro_f1", "weighted_f1", "per_class_f1"]
+  compute_cost: true            # Track FLOPs, params, training time, inference time
+  confusion_matrix: true
+  statistical_test: "wilcoxon"  # wilcoxon | paired_t | bootstrap
+
+# ---- Logging ----
+logging:
+  level: "INFO"
+  save_dir: "results"
+  tensorboard: true
+  save_best_model: true
+  save_predictions: true
+  log_every_n_steps: 10
