@@ -340,6 +340,30 @@ def build_dataloaders(
     return train_loader, val_loader, test_loader
 
 
+def _maybe_compile(model, device):
+    """Optionally wrap the model in torch.compile to cut kernel-launch overhead.
+
+    These recurrent TGNNs are launch-bound (125 sequential timesteps, each a
+    tiny graph-conv on a small graph), so the GPU sits mostly idle waiting on
+    kernel launches. torch.compile fuses kernels / (in reduce-overhead mode)
+    captures CUDA graphs to remove that overhead. It only changes speed, not
+    numerics/results. Enabled on CUDA by default (TORCH_COMPILE=1); set
+    TORCH_COMPILE=0 to disable, TORCH_COMPILE_MODE to pick the mode. The first
+    epoch of each fold pays a one-time compile cost — judge speed from epoch 2+.
+    Falls back to eager if compilation raises.
+    """
+    if device.type != "cuda" or os.environ.get("TORCH_COMPILE", "1") != "1":
+        return model
+    mode = os.environ.get("TORCH_COMPILE_MODE", "default")
+    try:
+        compiled = torch.compile(model, mode=mode)
+        logger.info(f"  torch.compile ON (mode={mode}) — epoch 1 includes one-time compile")
+        return compiled
+    except Exception as e:  # pragma: no cover
+        logger.warning(f"  torch.compile failed ({e}); running eager")
+        return model
+
+
 def run_uea_experiment(
     config: dict,
     dataset_name: str,
@@ -529,6 +553,7 @@ def run_dsa_experiment(
             model_name, n_channels, n_classes, seq_len,
             model_cfg, graph_config, canonical_mode,
         )
+        model = _maybe_compile(model, device)
 
         # Dataloaders
         train_loader, val_loader, test_loader = build_dataloaders(
