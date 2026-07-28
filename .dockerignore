@@ -1,0 +1,28 @@
+# Large data/result directories — mounted as volumes
+results/
+data/
+UCI/
+BasicMotions/
+Epilepsy/
+
+# Python/dev noise
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+.mypy_cache/
+
+# LaTeX
+thesis_draft/
+
+# Git / OS
+.git/
+.DS_Store
+
+# Test scratch files
+test_*.py
+
+# macOS
+.DS_Store

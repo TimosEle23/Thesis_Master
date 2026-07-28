@@ -55,6 +55,15 @@ class LSTMClassifier(nn.Module):
             bidirectional=bidirectional,
         )
 
+        # Initialize forget gate biases to 1.0 to encourage remembering by
+        # default at the start of training (Jozefowicz et al., 2015).
+        # PyTorch bias layout per layer: [i-gate | f-gate | g-gate | o-gate]
+        for names in self.lstm._all_weights:
+            for name in filter(lambda n: "bias" in n, names):
+                bias = getattr(self.lstm, name)
+                n = bias.size(0)
+                bias.data[n // 4: n // 2].fill_(1.0)
+
         self.dropout = nn.Dropout(dropout)
         self.layer_norm = nn.LayerNorm(hidden_dim * self.num_directions)
         

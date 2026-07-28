@@ -1,0 +1,485 @@
+================================================================================
+  EDA NOTEBOOK EXPLANATION
+  File: notebooks/eda.ipynb
+  Thesis: Benchmarking Temporal Graph Neural Networks for Multivariate
+          Time-Series Classification in Wearable Human Activity Recognition
+================================================================================
+
+This document walks through every section of the Exploratory Data Analysis (EDA)
+notebook produced for the Master's thesis. Its purpose is to describe what each
+cell does, what the resulting visualisations show, and why each analysis step
+matters for the subsequent modelling work.
+
+──────────────────────────────────────────────────────────────────────────────
+OVERVIEW — THREE DATASETS
+──────────────────────────────────────────────────────────────────────────────
+
+The thesis benchmarks models across three multivariate time-series HAR datasets:
+
+  ┌────────────────┬───────┬─────────────────────────┬──────────┬─────────┬──────────┬─────────┐
+  │ Dataset        │ Phase │ Sensor placement        │ Channels │ Classes │ Seq. len │ Samples │
+  ├────────────────┼───────┼─────────────────────────┼──────────┼─────────┼──────────┼─────────┤
+  │ BasicMotions   │   1   │ 1 wrist (acc + gyro)    │    6     │    4    │  100 @   │   80    │
+  │                │       │                         │          │         │  10 Hz   │         │
+  ├────────────────┼───────┼─────────────────────────┼──────────┼─────────┼──────────┼─────────┤
+  │ Epilepsy       │   1   │ 1 wrist (acc only)      │    3     │    4    │  206 @   │   275   │
+  │                │       │                         │          │         │  16 Hz   │         │
+  ├────────────────┼───────┼─────────────────────────┼──────────┼─────────┼──────────┼─────────┤
+  │ DSA (UCI)      │   2   │ 5 body units            │   45     │   19    │  125 @   │  9,120  │
+  │                │       │ (acc + gyro + mag each) │          │         │  25 Hz   │         │
+  └────────────────┴───────┴─────────────────────────┴──────────┴─────────┴──────────┴─────────┘
+
+Phase 1 uses standard train/test splits (UEA benchmark).
+Phase 2 uses Leave-One-Subject-Out (LOSO) cross-validation with 8 subjects.
+
+Data format convention (NTC):
+  All arrays are in the shape  (N, T, C)  =  (samples, timesteps, channels).
+  The raw UEA .npy files for BasicMotions and Epilepsy were stored as NCT (N, C, T),
+  so the loader transposes them on load. DSA processed files are already NTC.
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 1 — Import Required Libraries  (Cell 2)
+──────────────────────────────────────────────────────────────────────────────
+
+What it does:
+  Imports numpy, pandas, matplotlib, seaborn, json, os, sys, and collections.
+  Sets global Seaborn theme (whitegrid), default DPI (120), and figure size (12×5).
+  Adds the project root to sys.path so all src.* imports work.
+  Uses `%matplotlib inline` to embed plots directly in the notebook.
+
+Why it matters:
+  Establishes a reproducible visual style and ensures all path-dependent imports
+  resolve correctly regardless of where the notebook is launched from.
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 2 — Load All Datasets  (Cell 4)
+──────────────────────────────────────────────────────────────────────────────
+
+What it does:
+  Defines two loader functions:
+    - load_uea(name, n_channels): reads BasicMotions or Epilepsy from .npy files.
+      Detects NCT format by checking shape[1] == n_channels, and transposes to NTC.
+    - load_dsa(): reads the processed DSA .npy files (X, y, subjects) plus metadata.
+  Calls both and prints confirmed shapes.
+
+Output:
+  BasicMotions X_train: (40, 100, 6)   ← 40 train samples, 100 timesteps, 6 channels
+  Epilepsy     X_train: (137, 206, 3)  ← 137 train samples, 206 timesteps, 3 channels
+  DSA          X:       (9120, 125, 45) ← 9120 samples, 125 timesteps, 45 channels
+
+Why it matters:
+  Correct array orientation is fundamental. Having NCT vs NTC wrong would silently
+  corrupt every downstream analysis (channel statistics would be computed over
+  timestep slices instead of channel slices).
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 3 — Preview & Data Shape  (Cell 6)
+──────────────────────────────────────────────────────────────────────────────
+
+What it does:
+  Builds a Pandas summary table with one row per dataset containing:
+  Samples, Train/Test split, Timesteps, Channels, Classes, dtype, Min, Max, Mean, Std, NaN count.
+
+What the table shows:
+  - BasicMotions and Epilepsy have already-defined train/test splits; DSA uses LOSO-CV.
+  - All datasets are float64 with no NaN values.
+  - Value ranges differ substantially across datasets (raw sensor units are not
+    standardised globally), confirming that per-sample normalisation will be needed
+    before training.
+  - DSA is by far the largest dataset (~100× more samples than BasicMotions).
+
+Why it matters:
+  This is the first sanity check. It confirms the data loaded correctly and gives
+  an immediate comparison of scale and complexity across datasets.
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 4 — Missing Values & Duplicates  (Cell 8)
+──────────────────────────────────────────────────────────────────────────────
+
+What it does:
+  For each dataset, counts NaN values, Inf values, and duplicate samples
+  (samples with identical flattened feature vectors).
+
+Findings:
+  - BasicMotions: 0 NaN, 0 Inf, 0 duplicates
+  - Epilepsy:     0 NaN, 0 Inf, 1 duplicate
+  - DSA:          0 NaN, 0 Inf, 0 duplicates
+
+Why it matters:
+  Clean data is a prerequisite for reliable training. The single Epilepsy
+  duplicate is minor and does not affect results (275 samples total). Knowing
+  there are no missing values means we do not need imputation strategies.
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 5 — Class Distribution  (Cells 10, 11, 12)
+──────────────────────────────────────────────────────────────────────────────
+
+What it does:
+  Three separate horizontal bar charts, one per dataset.
+  Each bar represents one class; the count of samples is annotated on the bar.
+
+Findings:
+  - BasicMotions: Perfectly balanced — 20 samples per class across 4 classes.
+  - Epilepsy:     Mostly balanced — class counts range ~60–80 across 4 classes,
+                  with a slight imbalance in the minority class.
+  - DSA:          Perfectly balanced — 480 samples per activity across 19 activities
+                  (8 subjects × 60 windows each).
+
+Why it matters:
+  Class balance determines whether accuracy is a reliable metric.
+  For BasicMotions and DSA the balance is perfect, so accuracy is appropriate.
+  The mild Epilepsy imbalance motivates also reporting F1-score per class.
+  Balance also justifies not needing oversampling or class-weighted loss.
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 6 — Per-Channel Distributions  (Cells 14, 15)
+──────────────────────────────────────────────────────────────────────────────
+
+What it does:
+  Box-and-whisker plots showing the value distribution of each sensor channel
+  aggregated across all samples and timesteps. Outliers are hidden for clarity.
+
+  Cell 14: Two side-by-side boxplots for BasicMotions (6 channels) and Epilepsy
+           (3 channels), followed by per-channel numeric descriptive statistics.
+
+  Cell 15: Five side-by-side boxplots for DSA grouped by body unit
+           (Torso / RightArm / LeftArm / RightLeg / LeftLeg — 9 channels each).
+           Y-axis is shared across all five panels for cross-unit comparison.
+
+Findings:
+  - BasicMotions: Accelerometer channels (AccX/Y/Z) have wider IQR than gyroscope
+    channels, indicating larger variance in raw movement acceleration.
+  - Epilepsy: Three acceleration axes have similar scale; AccZ tends to have
+    higher absolute values (gravity component, sensor orientation).
+  - DSA: Channel scale varies across body units. Leg sensors exhibit higher
+    variance during locomotion activities. Gyroscope channels are more compact
+    than accelerometer channels within each unit.
+
+Why it matters:
+  These plots motivate per-channel (or per-unit) z-score normalisation before
+  training. They also reveal which sensor axes carry the most signal variance,
+  informing which graph edges are likely most informative.
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 7 — Sample Time Series  (Cells 17, 18, 19)
+──────────────────────────────────────────────────────────────────────────────
+
+What it does:
+  Visualises one raw sensor trace per class to build intuition about the
+  temporal patterns that models will learn.
+
+  Cell 17 — BasicMotions: Stacked subplots (one per class), 6 channels overlaid,
+            x-axis in seconds (100 samples at 10 Hz = 10 s).
+
+  Cell 18 — Epilepsy: Stacked subplots (one per class), 3 channels overlaid,
+            x-axis in seconds (206 samples at 16 Hz ≈ 12.9 s).
+
+  Cell 19 — DSA: 4×5 grid of subplots (one per activity), showing only the
+            torso accelerometer (3 channels) for visual clarity,
+            x-axis in seconds (125 samples at 25 Hz = 5 s).
+
+Findings:
+  - BasicMotions: Activities like "badminton" and "tennis" show high-frequency
+    oscillations in the gyroscope channels; "standing" is nearly flat.
+  - Epilepsy: The epileptic seizure class has characteristic rapid, high-amplitude
+    tremors; walking and running show periodic patterns; resting is smooth.
+  - DSA: Static activities (sitting, standing, lying) produce near-constant torso
+    signals. Dynamic activities (running, jumping, cycling) produce high-amplitude
+    periodic waveforms clearly distinguishable by eye.
+
+Why it matters:
+  This confirms that raw temporal patterns are class-discriminative, justifying
+  the use of recurrent and convolutional temporal models. The difference in
+  frequency content across activities motivates the spectral analysis in the
+  TGNN EDA section.
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 8 — Correlation Analysis  (Cells 21, 22)
+──────────────────────────────────────────────────────────────────────────────
+
+What it does:
+  Inter-channel Pearson correlation matrices computed across all flattened samples.
+
+  Cell 21: Two 6×6 (BasicMotions) and 3×3 (Epilepsy) annotated correlation heatmaps.
+
+  Cell 22: For DSA — (a) a full 45×45 correlation matrix displayed as an image,
+           with black lines marking body-unit boundaries; (b) a coarse 5×5 heatmap
+           of mean absolute correlation between body units.
+
+Findings:
+  - BasicMotions: Strong positive correlation between AccX/AccY/AccZ
+    (accelerometer axes move together). Moderate cross-type correlation
+    between matching axes (AccX–GyroX etc.), validating the predefined graph edges.
+  - Epilepsy: High correlation between all three acceleration axes — the signal
+    is dominated by overall arm movement rather than axis-specific patterns.
+    This motivates the fully connected 3-node graph.
+  - DSA: Within-unit correlations are high (block-diagonal structure visible).
+    Cross-unit correlations are moderate, with both arms and both legs showing
+    symmetric patterns. This directly justifies constructing a body-segment graph
+    where edges connect anatomically related body parts.
+
+Why it matters — connection to TGNN:
+  The correlation structure is the empirical justification for predefined graph
+  construction (RQ2 in the thesis). High within-unit correlation supports intra-unit
+  edges; cross-unit correlation supports inter-unit (anatomical) edges.
+  If channels within a body unit were uncorrelated, a fully connected graph or
+  no graph at all would be the correct baseline.
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 9 — Outlier Detection  (Cell 24)
+──────────────────────────────────────────────────────────────────────────────
+
+What it does:
+  Applies the 1.5×IQR rule per channel to count outlier data points.
+  Reports total data points per channel, number of channels exceeding 5% outliers,
+  and for DSA shows the top-10 channels by outlier percentage.
+
+Findings:
+  - BasicMotions: 6/6 channels have >5% outliers — all accelerometer and gyroscope
+    axes contain extreme impulse values (expected for high-speed racket sports).
+  - Epilepsy:     1/3 channels >5% — likely AccZ, which captures gravity effects
+    during the seizure episodes where orientation changes rapidly.
+  - DSA:          22/45 channels >5% — mostly in limb sensors during locomotion
+    activities where acceleration spikes (foot-strike impacts) are common.
+
+Why it matters:
+  High outlier rates in kinematic data are expected and generally should NOT be
+  removed — they encode the most discriminative event patterns (e.g., impact at
+  foot strike). This confirms that robust training (e.g., gradient clipping) is
+  more appropriate than outlier removal.
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 10 — Per-Channel Value Distributions by Class  (Cells 26, 27)
+──────────────────────────────────────────────────────────────────────────────
+
+What it does:
+  Overlaid histograms (density-normalised) per class for each sensor channel.
+  Classes are colour-coded. A random subsample is used for DSA speed.
+
+  Cell 26 — BasicMotions: 2×3 grid of histogram panels (one per channel).
+  Cell 27 — Epilepsy: 1×3 row of histogram panels.
+
+Findings:
+  - BasicMotions: GyroX, GyroY, GyroZ show clearly separated distributions for
+    "standing" (tight, near-zero) vs. "badminton"/"tennis" (wide spread).
+    AccX/Y/Z distributions overlap more across classes.
+  - Epilepsy: The seizure class shows a heavier tail (wider distribution) in all
+    three axes compared to walking, running, and resting, although the distributions
+    overlap substantially — confirming that raw histograms alone are not sufficient
+    for classification and temporal modelling is necessary.
+
+Why it matters:
+  This analysis reveals which channels are most class-discriminative in raw
+  value terms. Channels with strongly separated per-class distributions will
+  likely receive higher learned weights in the graph convolution operations.
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 11 — DSA Subject Variability  (Cell 29)
+──────────────────────────────────────────────────────────────────────────────
+
+What it does:
+  Two plots displayed side by side for the DSA dataset:
+
+  (a) Grouped bar chart: Mean absolute sensor value per subject per body unit.
+      Each cluster of bars represents one subject (8 subjects total); the 5 bars
+      within each cluster correspond to the 5 body units.
+
+  (b) Annotated heatmap: Exact sample count per Subject × Activity cell.
+      Each cell shows an integer (expected: 60 per cell). Grid lines separate cells.
+
+Findings:
+  - The bar chart reveals substantial inter-subject variability in absolute signal
+    magnitude. The Torso unit shows less variability than the limb units (arms and
+    legs), suggesting torso-based features may generalise better across subjects.
+  - The heatmap confirms the dataset is perfectly balanced: every subject performed
+    every activity exactly 60 times. This validates LOSO-CV as a fair evaluation
+    protocol — no subject is penalised by having fewer training samples.
+
+Why it matters:
+  Inter-subject variability is the core challenge in Leave-One-Subject-Out
+  evaluation. High variability means models must learn activity patterns that
+  generalise across individuals rather than fitting to subject-specific traits.
+  This motivates using graph structure to encode body kinematics that are more
+  invariant across subjects than raw channel values.
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 12 — Dimensionality Reduction: PCA & t-SNE  (Cell 31)
+──────────────────────────────────────────────────────────────────────────────
+
+What it does:
+  Projects each sample (flattened to a 1D feature vector after z-score scaling)
+  into 2D using:
+    - PCA (Principal Component Analysis): linear projection to the two principal
+      directions of maximum variance.
+    - t-SNE (t-Distributed Stochastic Neighbour Embedding): non-linear manifold
+      embedding that preserves local neighbourhood structure.
+
+  Result:  2×3 grid of scatter plots — (PCA row, t-SNE row) × (3 datasets).
+  Each point is a sample, coloured by class label.
+
+  Also prints the variance explained by the first two PCs for each dataset.
+
+Findings:
+  - BasicMotions (PCA): Two principal components explain a large fraction of
+    variance, and the four classes form relatively well-separated clusters even
+    in the linear PCA projection.
+  - BasicMotions (t-SNE): Clusters are tighter and better separated.
+    "Standing" is the most isolated cluster; "badminton" and "tennis" partially
+    overlap, consistent with their similar motion profiles.
+  - Epilepsy (PCA/t-SNE): Classes are less linearly separable in PCA;
+    t-SNE reveals a more structured manifold with the seizure class forming a
+    distinct region.
+  - DSA (PCA): First two PCs capture only a modest fraction of the total variance
+    (expected for a 45-channel, 125-timestep dataset with 19 classes). Static and
+    dynamic activities form rough macro-clusters.
+  - DSA (t-SNE): Clearer cluster structure emerges — locomotion activities
+    (running, jumping, cycling) group together; static activities cluster
+    separately; similar activities (e.g., both cycling variants) are adjacent.
+
+Why it matters:
+  PCA and t-SNE on raw flattened features act as an upper bound for linear
+  separability. The fact that t-SNE produces meaningful clusters from raw features
+  (before any training) confirms that the signal carries discriminative information.
+  It also provides a visual baseline: models should ideally learn representations
+  at least as well-separated as these 2D projections.
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 13 — TGNN Graph Construction — Predefined Adjacency Structures  (1 code cell)
+──────────────────────────────────────────────────────────────────────────────
+[Note: Added as part of the TGNN design EDA.]
+
+What it does:
+  Calls build_predefined_graph() for each dataset and visualises the resulting
+  normalised adjacency matrices as annotated heatmaps (3 panels side-by-side):
+    - BasicMotions (6×6): Intra-accelerometer edges, intra-gyroscope edges,
+      and cross-type same-axis edges (AccX↔GyroX, AccY↔GyroY, AccZ↔GyroZ).
+    - Epilepsy (3×3): Fully connected graph (all three axes connected).
+    - DSA Coarse (5×5): Anatomical body-segment graph (Torso, RightArm, LeftArm,
+      RightLeg, LeftLeg) with kinematic links and bilateral symmetry.
+
+  Also prints a summary table with node count, directed edge count, and graph
+  density for all four configurations (BM, EP, DSA coarse, DSA fine 45-node).
+
+Findings:
+  - BasicMotions 6-node graph: 9 directed edges from the hand-crafted connectivity
+    (6 intra-type + 3 cross-axis) plus self-loops. This reflects the physical sensor
+    placement (one IMU = acc+gyro sharing the same reference frame).
+  - Epilepsy 3-node graph: Fully connected (6 edges + self-loops) — justified by
+    the high inter-axis correlation observed in Section 8.
+  - DSA coarse 5-node graph: 8 undirected edges encoding anatomical kinematic chains
+    (spine, arms, legs) plus bilateral symmetry links.
+  - DSA fine 45-node graph: ~180+ edges from both intra-unit (axis correlation)
+    and inter-unit (anatomical) connections.
+
+Why it matters:
+  These graphs are the primary structural input to the TGNN models. Visualising
+  them confirms that the domain-knowledge encoding is correct before training.
+  The comparison of coarse vs. fine granularity is central to RQ2: does richer
+  graph structure improve classification?
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 14 — Graph Alignment — Correlation Evidence for Edges  (1 code cell)
+──────────────────────────────────────────────────────────────────────────────
+[Note: Added as part of the TGNN design EDA.]
+
+What it does:
+  Overlays the predefined graph edges (drawn as circles) onto the empirical
+  channel correlation heatmaps (from Section 8) — 3 panels side-by-side.
+  If a circle lands on a high-correlation cell, the edge is empirically justified.
+
+  Also prints a quantitative alignment table:  for each dataset it reports
+  mean |r| for connected pairs, mean |r| for unconnected pairs, and their ratio
+  ("lift"), showing by how much the predefined edges select more-correlated pairs.
+
+Findings:
+  - For BasicMotions and Epilepsy, the predefined edges consistently connect
+    channel pairs with higher-than-average correlation, confirming that the
+    domain-knowledge graph reflects the actual data structure.
+  - For DSA coarse, within-unit pairs (connected by the graph) have significantly
+    higher mean absolute correlation than cross-unit pairs. However, some
+    anatomically connected pairs (e.g., Torso–LeftLeg) also show moderate
+    correlation, validating those edges.
+
+Why it matters:
+  This directly motivates RQ2. If the predefined graph perfectly matched the
+  empirical correlations, adaptive (learned) graphs would add no value.
+  The partial alignment means adaptive graphs have room to discover connections
+  that domain knowledge misses — this is the core experimental hypothesis.
+
+──────────────────────────────────────────────────────────────────────────────
+SECTION 15 — Temporal Structure — Autocorrelation & Spectral Analysis  (1 code cell)
+──────────────────────────────────────────────────────────────────────────────
+[Note: Added as part of the TGNN design EDA.]
+
+What it does:
+  Analyses the temporal structure of the signals to motivate the "temporal"
+  component of TGNN models.
+
+  (a) Autocorrelation: For each dataset, plots the per-channel autocorrelation
+      function (ACF) up to 50% of sequence length. Classes are colour-coded.
+
+  (b) Spectral analysis (FFT): For each dataset, plots the mean power spectral
+      density (PSD) per class across the dominant frequency band.
+      For DSA, only the torso accelerometer is shown for clarity.
+
+Findings:
+  - BasicMotions: Sports activities (badminton, tennis) show strong periodicity
+    at ~1–3 Hz (stroke frequency). Standing shows near-zero autocorrelation.
+  - Epilepsy: The seizure class shows a characteristic autocorrelation peak at
+    3–5 Hz, corresponding to typical tremor frequency. Other classes decay faster.
+  - DSA: Activities are well-separated in frequency space.
+    Running and exercising on stepper: dominant peaks at 1–3 Hz.
+    Cycling: strong fundamental at ~1 Hz with harmonics.
+    Static activities: near-flat PSD.
+
+Why it matters:
+  Periodic temporal patterns motivate both the recurrent (LSTM/GRU) and
+  convolutional (TCN) temporal modelling choices. The characteristic frequencies
+  also explain why a fixed 5-second window (125 samples at 25 Hz) captures at least
+  3–5 full cycles of the dominant activity rhythm — making the temporal context
+  sufficient for robust classification.
+
+──────────────────────────────────────────────────────────────────────────────
+SUMMARY OF KEY EDA FINDINGS AND THEIR MODELLING IMPLICATIONS
+──────────────────────────────────────────────────────────────────────────────
+
+  Finding                                      → Modelling implication
+  ─────────────────────────────────────────────────────────────────────
+  All datasets are class-balanced             → Accuracy is a valid primary metric
+  No missing values                           → No imputation needed
+  Raw values not on same scale                → z-score normalisation per channel
+  High intra-sensor correlation               → Graph edges within sensor units justified
+  Moderate inter-sensor correlation           → Cross-unit edges plausible (not noise)
+  Classes separable in t-SNE                  → Discriminative signal exists before training
+  Strong within-unit correlation (DSA)        → Predefined coarse graph is well-motivated
+  Partial cross-unit correlation (DSA)        → Adaptive graph may discover extra edges
+  High outlier rates (impulse signals)        → Keep outliers; use gradient clipping
+  Periodic temporal patterns                  → Recurrent models fit the temporal structure
+  Large inter-subject variability (DSA)       → LOSO-CV is the correct evaluation protocol
+  8 subjects × 60 windows × 19 classes       → Balanced LOSO folds (no stratification needed)
+
+──────────────────────────────────────────────────────────────────────────────
+TECHNICAL NOTES
+──────────────────────────────────────────────────────────────────────────────
+
+Execution environment:
+  - Kernel: conda-base (Anaconda base Python 3.x, /opt/anaconda3/bin/python3)
+  - Reason: The thesis project .venv is on iCloud Drive, which corrupts compiled
+    .so files (mmap errno=60), preventing sklearn from loading. The conda base
+    environment is outside iCloud and works reliably.
+  - Execution command:
+      /opt/anaconda3/bin/jupyter nbconvert --to notebook --execute --inplace
+        --ExecutePreprocessor.kernel_name=conda-base notebooks/eda.ipynb
+
+t-SNE note:
+  method='exact' is used instead of the default 'barnes_hut'. This bypasses a
+  kneighbors_graph → threadpoolctl → OpenBLAS incompatibility in the conda
+  environment. 'exact' is slower (O(N²)) but produces identical results for the
+  sample sizes in this notebook (≤500 points after subsampling).
+
+Data format note:
+  UEA .npy files (BasicMotions, Epilepsy) are stored as NCT (N, C, T) by the
+  sktime export pipeline. All analysis in this notebook assumes NTC after the
+  load_uea() transpose.  The processed DSA .npy files are already in NTC format.
+
+================================================================================

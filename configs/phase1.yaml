@@ -83,8 +83,8 @@ graphs:
 
 # ---- Models to evaluate in Phase 1 ----
 models_to_run:
-  baselines: ["lstm", "tcn", "transformer"]
-  tgnns: ["gconv_lstm", "gconv_gru", "a3tgcn", "dcrnn"]
+  baselines: ["lstm", "tcn", "transformer", "cnn_bigru"]
+  tgnns: ["gconv_lstm", "gconv_gru", "a3tgcn", "dcrnn", "hybrid_tgnn"]
   graph_modes: ["predefined", "adaptive"]  # For each TGNN, run both strategies
 
 # ---- Phase 1 specific training overrides ----

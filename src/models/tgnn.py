@@ -311,23 +311,39 @@ class DCRNNCell(nn.Module):
 # =============================================================================
 
 class A3TGCNCell(nn.Module):
-    """A3TGCN cell: GConvGRU with temporal attention mechanism.
-    
-    Based on Bai et al. (2021). Adds an attention mechanism over the
-    temporal dimension to weight the importance of different time steps.
+    """A3TGCN cell: GConvGRU with node-level attention gate.
+
+    Based on Bai et al. (2021) "A3T-GCN: Attention Temporal Graph Convolutional
+    Network for Traffic Forecasting". Each cell applies a sigmoid attention gate
+    on the new hidden state, allowing the network to selectively suppress or
+    amplify node representations at each time step. This is distinct from (and
+    complementary to) the global temporal attention pooling applied after all
+    time steps in TGNNClassifier.forward().
     """
 
     def __init__(self, in_features: int, hidden_dim: int, K: int = 2):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.gconv_gru = GConvGRUCell(in_features, hidden_dim, K)
-        
-        # Temporal attention
+
+        # Node-level attention gate: produces per-node scalar gate in (0, 1)
         self.attention = nn.Linear(hidden_dim, 1)
 
     def forward(self, x, adj, h=None):
-        """Same as GConvGRU forward."""
-        return self.gconv_gru(x, adj, h)
+        """
+        Args:
+            x: (batch, num_nodes, in_features)
+            adj: (num_nodes, num_nodes)
+            h: (batch, num_nodes, hidden_dim)
+
+        Returns:
+            h_gated: (batch, num_nodes, hidden_dim) — attention-gated hidden state
+        """
+        h_new = self.gconv_gru(x, adj, h)  # (B, N, H)
+
+        # Attention gate: sigmoid score per node, broadcast over hidden_dim
+        gate = torch.sigmoid(self.attention(h_new))  # (B, N, 1)
+        return gate * h_new
 
 
 # =============================================================================
@@ -361,6 +377,7 @@ class TGNNClassifier(nn.Module):
         graph_mode: str = "predefined",
         adaptive_embed_dim: int = 16,
         adaptive_sparsity: float = 0.1,
+        adaptive_mode: str = "factored",
         edge_index: torch.Tensor = None,
         edge_weight: torch.Tensor = None,
         adj_matrix: torch.Tensor = None,
@@ -408,14 +425,19 @@ class TGNNClassifier(nn.Module):
         else:
             self.register_buffer("adj_matrix", torch.eye(num_nodes))
 
-        # Adaptive graph learner (for RQ2 comparison)
+        # Adaptive graph learner (for RQ2 comparison).
+        # When adj_matrix is supplied and graph_mode='adaptive', we seed the
+        # learner from that predefined matrix so drift from init can be measured.
         self.adaptive_graph = None
         if graph_mode == "adaptive":
+            init_mat = self.adj_matrix if adj_matrix is not None or edge_index is not None else None
             self.adaptive_graph = AdaptiveGraphLearner(
                 num_nodes=num_nodes,
                 embed_dim=adaptive_embed_dim,
                 symmetric=True,
                 sparsity_threshold=adaptive_sparsity,
+                init_matrix=init_mat,
+                mode=adaptive_mode,
             )
 
         # Input projection: project node features to hidden_dim
@@ -470,13 +492,17 @@ class TGNNClassifier(nn.Module):
         return self.adj_matrix
 
     def _reshape_input(self, x: torch.Tensor) -> torch.Tensor:
-        """Reshape input from (B, T, C) to (B, T, N, F).
+        """Reshape input to (B, T, N, F).
         
-        For channel-as-node (F=1): (B, T, C) → (B, T, C, 1)
-        For unit-as-node (e.g., F=9): (B, T, C) → (B, T, N, F)
+        Handles both 3D (B, T, C) from flat data and 4D (B, T, N, F) from
+        GraphMTSDataset with sensor_groups (unit-as-node mode).
         """
-        B, T, C = x.shape
+        if x.ndim == 4:
+            # Already (B, T, N, F) from GraphMTSDataset unit mode
+            return x
         
+        # x is (B, T, C)
+        B, T, C = x.shape
         if self.node_features_dim == 1:
             # Channel-as-node: each channel is a node with 1 feature
             return x.unsqueeze(-1)  # (B, T, N, 1) where N=C
@@ -489,12 +515,13 @@ class TGNNClassifier(nn.Module):
         """Forward pass.
         
         Args:
-            x: Input tensor of shape (batch, seq_len, n_channels).
+            x: Input tensor of shape (batch, seq_len, n_channels) or
+               (batch, seq_len, n_nodes, node_feat_dim).
             
         Returns:
             Logits of shape (batch, n_classes).
         """
-        B, T, C = x.shape
+        B, T = x.shape[0], x.shape[1]
         
         # Reshape to node format: (B, T, N, F)
         x_nodes = self._reshape_input(x)
@@ -557,6 +584,15 @@ class TGNNClassifier(nn.Module):
         if self.adaptive_graph is not None:
             return self.adaptive_graph.get_adjacency()
         return None
+
+    def adjacency_drift(self) -> dict:
+        """Return Frobenius-norm drift of learned adjacency from its init.
+
+        Returns zeros for predefined-graph models (no learnable adjacency).
+        """
+        if self.adaptive_graph is not None:
+            return self.adaptive_graph.adjacency_drift()
+        return {"frob_norm": 0.0, "relative_frob": 0.0, "A_current": None}
 
     def count_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)

@@ -14,7 +14,7 @@ experiment:
   num_seeds: 5                  # Run each config with 5 seeds for statistical robustness
   seeds: [42, 123, 456, 789, 1024]
   device: "cpu"                 # auto | cpu | cuda | mps
-  num_workers: 4
+  num_workers: 0                # 0 = main process only (avoids spawn/pickle issues on macOS)
   pin_memory: true
   deterministic: true
 
@@ -40,7 +40,14 @@ models:
     hidden_dim: 128
     num_layers: 2
     dropout: 0.3
-    bidirectional: false
+    bidirectional: true
+
+  cnn_bigru:
+    cnn_channels: [64, 128]
+    kernel_size: 3
+    gru_hidden_dim: 128
+    gru_num_layers: 2
+    dropout: 0.3
 
   tcn:
     num_channels: [64, 128, 128]
@@ -49,7 +56,7 @@ models:
 
   transformer:
     d_model: 128
-    nhead: 8
+    nhead: 4                    # head_dim = d_model/nhead = 32; nhead=8 gives dim=16 (too small)
     num_layers: 3
     dim_feedforward: 256
     dropout: 0.1
@@ -79,6 +86,14 @@ models:
     num_layers: 2
     dropout: 0.3
 
+  hybrid_tgnn:
+    hidden_dim: 64
+    K: 2
+    num_layers: 2
+    dropout: 0.3
+    adaptive_embed_dim: 16
+    adaptive_sparsity: 0.1
+
   astgcn:
     hidden_dim: 64
     K: 3
@@ -89,9 +104,24 @@ models:
 graph:
   # Predefined strategies
   predefined:
-    type: "domain"              # domain | full | identity | correlation
+    # Strategies: domain | correlation | dtw | dtw_windowed | knn_correlation | knn_dtw
+    type: "domain"
     normalize: true
     self_loops: true
+
+    # --- Correlation graph params ---
+    corr_threshold: 0.5         # Min |Pearson r| for an edge
+
+    # --- DTW graph params ---
+    # dtw_threshold OR dtw_k must be set when using dtw / dtw_windowed
+    dtw_threshold: null         # Min Gaussian similarity for an edge (0-1)
+    dtw_k: null                 # KNN k for DTW graph (mutually exclusive with dtw_threshold)
+    dtw_window: null            # Sakoe-Chiba band for dtw_windowed (int, e.g. 10% of seq_len)
+
+    # --- KNN graph params ---
+    # knn_k must be set when using knn_correlation or knn_dtw
+    knn_k: null                 # Required for knn_* strategies (no default — must set per dataset)
+    knn_metric: "correlation"   # 'correlation' or 'dtw'
 
   # Adaptive (learned) strategies
   adaptive:

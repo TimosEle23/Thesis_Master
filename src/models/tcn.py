@@ -14,6 +14,7 @@ dilation factors, enabling a large receptive field with fewer parameters.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils.parametrizations import weight_norm
 from typing import List
 
 
@@ -47,15 +48,18 @@ class TemporalBlock(nn.Module):
                  dilation: int, dropout: float = 0.2):
         super().__init__()
 
-        self.conv1 = nn.utils.parametrizations.weight_norm(
-            CausalConv1d(in_channels, out_channels, kernel_size, dilation).conv
-        )
-        self.conv2 = nn.utils.parametrizations.weight_norm(
-            CausalConv1d(out_channels, out_channels, kernel_size, dilation).conv
-        )
-        
         self.padding1 = (kernel_size - 1) * dilation
+        # weight_norm stabilises training and matches Bai et al. (2018)
+        self.conv1 = weight_norm(nn.Conv1d(
+            in_channels, out_channels, kernel_size,
+            padding=self.padding1, dilation=dilation
+        ))
+
         self.padding2 = (kernel_size - 1) * dilation
+        self.conv2 = weight_norm(nn.Conv1d(
+            out_channels, out_channels, kernel_size,
+            padding=self.padding2, dilation=dilation
+        ))
 
         self.relu1 = nn.ReLU()
         self.relu2 = nn.ReLU()

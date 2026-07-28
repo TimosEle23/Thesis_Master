@@ -115,6 +115,7 @@ class Trainer:
         self.early_stopper = EarlyStopping(
             patience=self.patience, min_delta=self.min_delta, mode="min"
         )
+        self.acc_plateau_counter = 0
 
         # Tracking
         self.history = {
@@ -125,6 +126,13 @@ class Trainer:
         self.best_val_loss = float("inf")
         self.best_val_acc = 0.0
         self.best_epoch = 0
+
+    @staticmethod
+    def _format_loss(loss_value: float) -> str:
+        """Format loss with enough precision to avoid printing tiny values as 0.0000."""
+        if loss_value >= 1e-4:
+            return f"{loss_value:.6f}"
+        return f"{loss_value:.6e}"
 
     def _build_scheduler(self, scheduler_type, params):
         if scheduler_type == "cosine":
@@ -191,7 +199,7 @@ class Trainer:
                 logger.info(
                     f"  Epoch {epoch:3d}/{self.epochs} | "
                     f"Train L:{train_loss:.4f} A:{train_acc:.4f} | "
-                    f"Val L:{val_loss:.4f} A:{val_acc:.4f} | "
+                    f"Val L:{self._format_loss(val_loss)} A:{val_acc:.4f} | "
                     f"LR:{current_lr:.6f} | {epoch_time:.1f}s"
                 )
 
@@ -214,10 +222,36 @@ class Trainer:
                 logger.info(f"  Early stopping at epoch {epoch} (best: {self.best_epoch})")
                 break
 
+            # Also stop when val_acc has plateaued at ≥0.9999 for `patience` epochs.
+            # Loss-only early stopping never fires when accuracy is perfect but
+            # softmax margin keeps sharpening (val_loss falls by 1e-4 each step,
+            # satisfying min_delta indefinitely). Wastes ~200 epochs on small
+            # datasets like BasicMotions.
+            if val_acc >= 0.9999:
+                self.acc_plateau_counter += 1
+                if self.acc_plateau_counter >= self.patience:
+                    logger.info(
+                        f"  Early stopping at epoch {epoch} "
+                        f"(val_acc plateaued at ~1.0 for {self.patience} epochs)"
+                    )
+                    break
+            else:
+                self.acc_plateau_counter = 0
+
         logger.info(
-            f"Training complete. Best val_loss={self.best_val_loss:.4f} "
+            f"Training complete. Best val_loss={self._format_loss(self.best_val_loss)} "
             f"(acc={self.best_val_acc:.4f}) at epoch {self.best_epoch}"
         )
+
+        # Adjacency drift (non-zero only for adaptive TGNN models)
+        drift = {}
+        if hasattr(self.model, "adjacency_drift"):
+            drift = self.model.adjacency_drift()
+            if drift["frob_norm"] > 0:
+                logger.info(
+                    f"  Adjacency drift: ||A_final - A_init||_F = {drift['frob_norm']:.4f} "
+                    f"(relative = {drift['relative_frob']:.4f})"
+                )
 
         return {
             "history": self.history,
@@ -227,6 +261,7 @@ class Trainer:
             "total_train_time_s": total_train_time,
             "avg_epoch_time_s": total_train_time / max(epoch, 1),
             "total_epochs": epoch,
+            "adjacency_drift": drift,
         }
 
     def _train_epoch(self, loader: DataLoader) -> tuple:

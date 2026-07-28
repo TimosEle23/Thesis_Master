@@ -12,13 +12,15 @@ from typing import Optional
 from src.models.lstm import LSTMClassifier
 from src.models.tcn import TCNClassifier
 from src.models.transformer import TransformerClassifier
+from src.models.cnn_bigru import CNNBiGRUClassifier
 from src.models.tgnn import TGNNClassifier
+from src.models.hybrid_tgnn import HybridTGNNClassifier
 
 logger = logging.getLogger("thesis")
 
 # All registered model names
-BASELINE_MODELS = ["lstm", "tcn", "transformer"]
-TGNN_MODELS = ["gconv_lstm", "gconv_gru", "a3tgcn", "dcrnn"]
+BASELINE_MODELS = ["lstm", "tcn", "transformer", "cnn_bigru"]
+TGNN_MODELS = ["gconv_lstm", "gconv_gru", "a3tgcn", "dcrnn", "hybrid_tgnn"]
 ALL_MODELS = BASELINE_MODELS + TGNN_MODELS
 
 
@@ -80,6 +82,37 @@ def build_model(
             max_seq_len=seq_len + 10,
         )
 
+    elif model_name == "cnn_bigru":
+        model = CNNBiGRUClassifier(
+            n_channels=n_channels,
+            n_classes=n_classes,
+            cnn_channels=model_config.get("cnn_channels", [64, 128]),
+            kernel_size=model_config.get("kernel_size", 3),
+            gru_hidden_dim=model_config.get("gru_hidden_dim", 128),
+            gru_num_layers=model_config.get("gru_num_layers", 2),
+            dropout=model_config.get("dropout", 0.3),
+        )
+
+    elif model_name == "hybrid_tgnn":
+        if graph_config is None:
+            raise ValueError("hybrid_tgnn requires graph_config")
+        model = HybridTGNNClassifier(
+            n_channels=n_channels,
+            n_classes=n_classes,
+            num_nodes=graph_config["num_nodes"],
+            node_features_dim=graph_config["node_features_dim"],
+            hidden_dim=model_config.get("hidden_dim", 64),
+            K=model_config.get("K", 2),
+            num_layers=model_config.get("num_layers", 2),
+            dropout=model_config.get("dropout", 0.3),
+            adaptive_embed_dim=model_config.get("adaptive_embed_dim", 16),
+            adaptive_sparsity=model_config.get("adaptive_sparsity", 0.1),
+            adaptive_mode=graph_config.get("adaptive_mode", "factored"),
+            edge_index=graph_config.get("edge_index"),
+            edge_weight=graph_config.get("edge_weight"),
+            adj_matrix=graph_config.get("adj_matrix"),
+        )
+
     elif model_name in TGNN_MODELS:
         if graph_config is None:
             raise ValueError(f"TGNN model '{model_name}' requires graph_config")
@@ -97,6 +130,7 @@ def build_model(
             graph_mode=graph_mode,
             adaptive_embed_dim=model_config.get("adaptive_embed_dim", 16),
             adaptive_sparsity=model_config.get("adaptive_sparsity", 0.1),
+            adaptive_mode=graph_config.get("adaptive_mode", "factored"),
             edge_index=graph_config.get("edge_index"),
             edge_weight=graph_config.get("edge_weight"),
             adj_matrix=graph_config.get("adj_matrix"),

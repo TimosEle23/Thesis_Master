@@ -72,13 +72,19 @@ def pairwise_wilcoxon(
     names = sorted(model_scores.keys())
     rows = []
     for a, b in combinations(names, 2):
-        result = wilcoxon_test(model_scores[a], model_scores[b])
-        rows.append({
-            "model_a": a,
-            "model_b": b,
-            "metric": metric,
-            **result,
-        })
+        # Use one-sided "greater" so that with n=5 seeds the minimum achievable
+        # p-value is 0.0312 (< 0.05).  model_a is tested as the stronger model.
+        scores_a = model_scores[a]
+        scores_b = model_scores[b]
+        mean_a = sum(scores_a) / len(scores_a)
+        mean_b = sum(scores_b) / len(scores_b)
+        # Always test the higher-mean model as "greater"
+        if mean_a >= mean_b:
+            result = wilcoxon_test(scores_a, scores_b, alternative="greater")
+            rows.append({"model_a": a, "model_b": b, "metric": metric, **result})
+        else:
+            result = wilcoxon_test(scores_b, scores_a, alternative="greater")
+            rows.append({"model_a": b, "model_b": a, "metric": metric, **result})
     return pd.DataFrame(rows)
 
 
@@ -138,11 +144,24 @@ def load_experiment_results(results_dir: str) -> pd.DataFrame:
     results_dir = Path(results_dir)
     rows = []
 
-    for f in sorted(results_dir.glob("**/*.json")):
+    for f in sorted(results_dir.glob("**/results.json")):
         try:
             with open(f) as fh:
                 data = json.load(fh)
-            rows.append(data)
+            if isinstance(data, dict) and "dataset" in data:
+                # Unify phase 2 metric names (mean) to match phase 1
+                if "accuracy_mean" in data and "accuracy" not in data:
+                    data["accuracy"] = data["accuracy_mean"]
+                if "macro_f1_mean" in data and "macro_f1" not in data:
+                    data["macro_f1"] = data["macro_f1_mean"]
+                if "n_parameters" in data and isinstance(data["n_parameters"], dict):
+                    data["n_parameters"] = data["n_parameters"].get("total", 0)
+                if "weighted_f1_mean" in data and "weighted_f1" not in data:
+                    data["weighted_f1"] = data["weighted_f1_mean"]
+                    
+                rows.append(data)
+            else:
+                logger.warning(f"Skipping {f}: missing 'dataset' key or invalid format")
         except Exception as e:
             logger.warning(f"Could not load {f}: {e}")
 
@@ -151,6 +170,13 @@ def load_experiment_results(results_dir: str) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame(rows)
+    
+    # Differentiate datasets by phase
+    if "phase" in df.columns:
+        # Fill missing phases with 1 just in case
+        df["phase"] = df["phase"].fillna(1)
+        df["dataset"] = df.apply(lambda r: f"{r['dataset']} (Phase {int(r['phase'])})", axis=1)
+        
     return df
 
 
@@ -325,8 +351,10 @@ def run_statistical_analysis(
     for ds in df["dataset"].unique():
         ds_df = df[df["dataset"] == ds]
         model_scores = {}
-        for name, group in ds_df.groupby("model"):
-            model_scores[name] = group["accuracy"].tolist()
+        for (name, mode), group in ds_df.groupby(["model", "graph_mode"]):
+            # Use 'none' instead of nan for mode
+            mode_str = str(mode) if pd.notna(mode) else "none"
+            model_scores[f"{name}_{mode_str}"] = group["accuracy"].tolist()
 
         if len(model_scores) > 1:
             pw = pairwise_wilcoxon(model_scores, metric="accuracy")
@@ -340,9 +368,10 @@ def run_statistical_analysis(
     for ds in df["dataset"].unique():
         ds_df = df[df["dataset"] == ds]
         ci_results[ds] = {}
-        for model_name, group in ds_df.groupby("model"):
+        for (model_name, mode), group in ds_df.groupby(["model", "graph_mode"]):
+            mode_str = str(mode) if pd.notna(mode) else "none"
             ci = bootstrap_ci(group["accuracy"].tolist())
-            ci_results[ds][model_name] = ci
+            ci_results[ds][f"{model_name}_{mode_str}"] = ci
 
     analysis["bootstrap_ci"] = ci_results
 

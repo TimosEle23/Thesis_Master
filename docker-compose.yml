@@ -1,0 +1,52 @@
+services:
+  # ── Interactive shell (dev/debug) ──────────────────────────
+  thesis:
+    build: .
+    image: thesis-tgnn
+    volumes:
+      - .:/app
+      - thesis-cache:/root/.cache          # persist pip / download caches
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    environment:
+      - PYTHONPATH=/app
+
+  # ── Phase 1: BasicMotions + Epilepsy (all models × 5 seeds) ──
+  phase1:
+    build: .
+    image: thesis-tgnn
+    volumes:
+      - .:/app
+      - thesis-cache:/root/.cache
+    working_dir: /app
+    environment:
+      - PYTHONPATH=/app
+    command: python -m scripts.run_all --phase 1 --device cpu
+
+  # ── Phase 2: DSA LOSO (all models × 5 seeds × 8 folds) ────
+  phase2:
+    build: .
+    image: thesis-tgnn
+    volumes:
+      - .:/app
+      - thesis-cache:/root/.cache
+    working_dir: /app
+    environment:
+      - PYTHONPATH=/app
+    command: python -m scripts.run_all --phase 2 --device cpu
+
+  # ── Analysis only (tables, plots, statistics) ──────────────
+  analyse:
+    build: .
+    image: thesis-tgnn
+    volumes:
+      - .:/app
+      - thesis-cache:/root/.cache
+    working_dir: /app
+    environment:
+      - PYTHONPATH=/app
+    command: python -m scripts.analyse_results
+
+volumes:
+  thesis-cache:

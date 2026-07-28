@@ -137,10 +137,32 @@ graphs:
 
 # ---- Models to evaluate in Phase 2 ----
 models_to_run:
-  baselines: ["lstm", "tcn", "transformer"]
-  tgnns: ["gconv_lstm", "gconv_gru", "a3tgcn", "dcrnn"]
-  graph_modes: ["predefined_coarse", "predefined_fine", "adaptive"]
-  # For each TGNN, run with predefined coarse, predefined fine, and adaptive
+  baselines: ["lstm", "tcn", "transformer", "cnn_bigru"]
+  tgnns: ["gconv_lstm", "gconv_gru", "a3tgcn", "dcrnn", "hybrid_tgnn"]
+  graph_modes: [
+    "predefined_coarse",         # fixed 5 body-segment anatomical graph
+    "predefined_fine",           # fixed 45 sensor-channel anatomical graph
+    "adaptive",                  # learned 5 body-segment graph, random init
+    "predefined_correlation_mean",        # NEW: data-driven fixed graph, |r|>=mean
+    "adaptive_correlation_mean",          # NEW: SVD-seeded from corr >=mean|r|
+    "adaptive_nosvd_correlation_mean",    # NEW: noSVD-seeded from corr >=mean|r|
+  ]
+  # For each TGNN, run with predefined coarse, predefined fine, adaptive,
+  # plus the three correlation-mean variants (matches Phase 1 Family E)
+
+  # Scheduling order only (does not change which experiments run — just
+  # front-loads these graph_modes across all TGNN models before the rest
+  # of graph_modes, so the new correlation-mean family finishes first).
+  priority_graph_modes: [
+    "predefined_correlation_mean",
+    "adaptive_correlation_mean",
+    "adaptive_nosvd_correlation_mean",
+  ]
+
+# ---- Phase 2 experiment overrides ----
+experiment:
+  num_workers: 8        # Snellius has 18 CPUs — use 8 workers to saturate the A100 GPU
+  pin_memory: true
 
 # ---- Phase 2 specific training overrides ----
 training:
@@ -157,6 +179,14 @@ models:
   lstm:
     hidden_dim: 256
     num_layers: 2
+    dropout: 0.3
+    bidirectional: true
+
+  cnn_bigru:
+    cnn_channels: [128, 256]
+    kernel_size: 3
+    gru_hidden_dim: 256
+    gru_num_layers: 2
     dropout: 0.3
 
   tcn:
@@ -193,3 +223,11 @@ models:
     K: 3
     num_layers: 2
     dropout: 0.3
+
+  hybrid_tgnn:
+    hidden_dim: 128
+    K: 3
+    num_layers: 2
+    dropout: 0.3
+    adaptive_embed_dim: 32
+    adaptive_sparsity: 0.1

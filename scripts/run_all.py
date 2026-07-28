@@ -67,6 +67,12 @@ def get_phase2_jobs(config: dict) -> list:
     graph_modes = config.get("models_to_run", {}).get(
         "graph_modes", ["predefined_coarse", "predefined_fine", "adaptive"]
     )
+    # Scheduling order only: run these graph_modes across all TGNN models
+    # before the remaining ones, so a priority family finishes first if the
+    # walltime runs out partway through.
+    priority = config.get("models_to_run", {}).get("priority_graph_modes", [])
+    ordered_modes = [gm for gm in priority if gm in graph_modes] + \
+        [gm for gm in graph_modes if gm not in priority]
 
     jobs = []
     # Baselines
@@ -76,9 +82,10 @@ def get_phase2_jobs(config: dict) -> list:
                 "phase": 2, "dataset": "DSA", "model": model,
                 "graph_mode": "none", "seed": seed,
             })
-    # TGNNs
-    for model in tgnns:
-        for gm in graph_modes:
+    # TGNNs — graph_mode outer loop so priority modes complete across all
+    # models before moving on to the rest.
+    for gm in ordered_modes:
+        for model in tgnns:
             for seed in seeds:
                 jobs.append({
                     "phase": 2, "dataset": "DSA", "model": model,
@@ -87,13 +94,27 @@ def get_phase2_jobs(config: dict) -> list:
     return jobs
 
 
-def run_all(phases: list, dry_run: bool = False, max_folds: int = None):
+def run_all(
+    phases: list,
+    dry_run: bool = False,
+    max_folds: int = None,
+    device_override: str | None = None,
+    results_base: Path | None = None,
+):
     """Run all experiments for the specified phases."""
     all_results = []
 
     for phase in phases:
         config = load_config(phase)
-        results_dir = PROJECT_ROOT / "results" / f"phase{phase}"
+
+        # Optional override to force CPU (or another device) across all jobs
+        if device_override is not None:
+            config.setdefault("experiment", {})
+            config["experiment"]["device"] = device_override
+        if results_base is not None:
+            results_dir = Path(results_base) / f"phase{phase}"
+        else:
+            results_dir = PROJECT_ROOT / "results" / f"phase{phase}"
         results_dir.mkdir(parents=True, exist_ok=True)
 
         if phase == 1:
@@ -159,7 +180,8 @@ def run_all(phases: list, dry_run: bool = False, max_folds: int = None):
                 })
 
     # Save summary of all results
-    summary_path = PROJECT_ROOT / "results" / "all_results_summary.json"
+    summary_base = results_base if results_base else PROJECT_ROOT / "results"
+    summary_path = summary_base / "all_results_summary.json"
     with open(summary_path, "w") as f:
         json.dump(all_results, f, indent=2, default=str)
     logger.info(f"\nAll results summary saved to {summary_path}")
@@ -175,6 +197,11 @@ def main():
                         help="Just print the experiment plan, don't run")
     parser.add_argument("--max_folds", type=int, default=None,
                         help="Max LOSO folds for DSA (default: all 8)")
+    parser.add_argument("--device", type=str, default=None,
+                        choices=["auto", "cpu", "cuda", "mps"],
+                        help="Force device for all runs (e.g., cpu to avoid missing GPU drivers)")
+    parser.add_argument("--results_dir", type=str, default=None,
+                        help="Base directory for results (default: <project>/results)")
     args = parser.parse_args()
 
     # Setup
@@ -187,7 +214,13 @@ def main():
         download_all_datasets()
 
     phases = [args.phase] if args.phase else [1, 2]
-    results = run_all(phases, dry_run=args.dry_run, max_folds=args.max_folds)
+    results = run_all(
+        phases,
+        dry_run=args.dry_run,
+        max_folds=args.max_folds,
+        device_override=args.device,
+        results_base=Path(args.results_dir) if args.results_dir else None,
+    )
 
     if not args.dry_run:
         # Quick summary

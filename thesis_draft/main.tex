@@ -1,0 +1,262 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{geometry}
+\usepackage{setspace}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage[numbers]{natbib}
+\usepackage{multirow}
+\usepackage{pdflscape}
+\usepackage{array}
+
+\geometry{margin=1in}
+\setstretch{1.15}
+
+\title{\textbf{Thesis Draft}\\
+Graph Neural Networks For Multivariate Time Series Activity Recognition}
+\author{Timos Eleftheriou}
+\date{March 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Multivariate time series classification (MTSC) is a core machine learning problem with direct relevance to human activity recognition from wearable sensors. This thesis investigates whether temporal graph neural networks (TGNNs) provide consistent and practically meaningful gains over strong sequence baselines, namely LSTM, Temporal Convolutional Networks, and Transformers. The work is motivated by a central methodological question: when inter-channel relations are physically meaningful, does explicit graph modeling improve predictive performance and reliability compared with implicit dependency learning in vector-based sequence models? To answer this question, the study uses a two-phase benchmark design with increasing structural complexity: BasicMotions and Epilepsy in Phase 1, and Daily and Sports Activities in Phase 2. The comparative axis focuses on graph construction strategy, contrasting predefined domain-knowledge adjacency with adaptive learned adjacency. Models are evaluated using classification performance and computational efficiency metrics under a standardized training and evaluation protocol. As this project is in progress, the present document is framed as a living draft that states the scientific vision, formalizes research questions, and establishes an extensible reporting structure for iterative updates as new results are produced.
+\end{abstract}
+
+% \tableofcontents
+\newpage
+\section{Introduction}
+Multivariate sensor streams contain two coupled sources of information: temporal dynamics and inter-variable structure. In wearable human activity recognition, this structure is not abstract; it is physically grounded in body segments, sensor placement, and biomechanical coordination \citep{altun2010har,uci_dsa}. Despite this, many high-performing sequence models operate on channel vectors without explicit relational priors, relying on model capacity to infer dependency patterns implicitly.
+
+This thesis examines whether explicitly encoding channel relations through graph-based temporal models produces measurable advantages over classical sequence architectures \citep{battaglia2018relational,wu2019graphwavenet}. The objective is not to argue that one model family is universally superior, but to establish evidence-based conditions under which each family is preferable. The benchmark is therefore designed around three principles: fairness (standardized pipeline), comparability (matched training protocol), and practical relevance (joint reporting of accuracy and computational cost) \citep{dau2019ucr}.
+
+The broader contribution sought in this work is a decision-oriented framework for model selection in wearable MTSC: if graph modeling helps, under what structural assumptions, and at what computational cost?
+
+The study is guided by the following research questions.
+
+\subsection*{Research Questions}
+\begin{enumerate}[label=\textbf{RQ\arabic*:},leftmargin=*]
+  \item How do temporal graph neural network architectures compare to traditional sequence models, in terms of classification accuracy and computational efficiency across the UEA benchmark datasets BasicMotions and Epilepsy?
+  \item To what extent does the choice of graph construction strategy, predefined domain-knowledge graphs versus adaptive learned adjacency matrices, affect TGNN classification performance, and does structural prior knowledge consistently provide an advantage over data-driven graph discovery across datasets of varying dimensionality?
+  \item Do the performance relationships between temporal graph neural networks and LSTM, TCN, and Transformer baselines observed on the UEA benchmark datasets hold when evaluated on a higher dimensional dataset where the graph represents distinct body segments rather than axes of a single sensor, and which architectural properties most influence this?
+\end{enumerate}
+
+\newpage
+\section{Related Work}
+
+This section surveys existing literature across three dimensions relevant to this thesis: (1)~sequence and deep learning methods applied to the same UEA benchmark datasets used in Phase~1, (2)~wearable HAR approaches evaluated on the Daily and Sports Activities dataset used in Phase~2, and (3)~graph neural network foundations that motivate the TGNN architectures studied.
+
+\subsection{Multivariate Time Series Classification on UEA Benchmarks}
+
+The UEA multivariate time series classification archive \citep{bagnall2018uea} established standardized datasets and evaluation protocols for MTSC research. Among these, BasicMotions (6~channels, 4~classes) and Epilepsy (3~channels, 4~classes) have been widely used as benchmark datasets. The comprehensive bake-off study by \citet{ruiz2021bakeoff} demonstrated that a range of classical and deep models achieve near-perfect accuracy on BasicMotions and high-90s accuracy on Epilepsy, indicating that these datasets are close to saturation for well-tuned methods.
+
+LSTM-based hybrids such as LSTM-FCN \citep{karim2019lstmfcn} represent strong recurrent baselines reaching 98--100\% on BasicMotions. Attention-based methods including TapNet \citep{zhang2020tapnet} and Transformer encoders \citep{zerveas2021transformer} achieve comparable results through global dependency modeling. Shapelet-based neural approaches such as ShapeNet \citep{li2021shapenet} and the more recent ShapeFormer \citep{le2024shapeformer}, which combines shapelets with Transformer attention, further confirm dataset saturation at or near 100\% on BasicMotions and 97--99\% on Epilepsy.
+
+The graph-based TodyNet \citep{liu2024todynet}, the closest existing TGNN reference for MTSC, matches sequence baselines on both datasets, suggesting that graph structure may not provide additional benefit when channel dimensionality is low.
+
+Table~\ref{tab:lit_uea} summarizes published classification accuracies across representative methods.
+
+\begin{table}[htbp]
+\centering
+\caption{Published classification accuracies (\%) on BasicMotions and Epilepsy from the UEA archive. Results are representative values from original publications or benchmark surveys.}
+\label{tab:lit_uea}
+\small
+\begin{tabular}{@{}llcc@{}}
+\toprule
+\textbf{Reference} & \textbf{Technique} & \textbf{BasicMotions} & \textbf{Epilepsy} \\
+\midrule
+\citet{ruiz2021bakeoff} & Benchmark (classical + deep) & $\sim$100 & $\sim$97--99 \\
+\citet{karim2019lstmfcn} & LSTM-FCN & $\sim$98--100 & $\sim$96--98 \\
+\citet{zhang2020tapnet} & TapNet (attention + prototype) & $\sim$100 & $\sim$97--99 \\
+\citet{li2021shapenet} & ShapeNet (shapelet NN) & $\sim$100 & $\sim$98--99 \\
+\citet{zerveas2021transformer} & Transformer encoder & $\sim$98--100 & $\sim$96--98 \\
+\citet{le2024shapeformer} & ShapeFormer (shapelet + Transf.) & 100 & $\sim$98.6 \\
+\citet{liu2024todynet} & TodyNet (temporal dynamic GNN) & $\sim$100 & $\sim$97 \\
+\midrule
+This work & Sequence vs.\ TGNN benchmark & \textit{TBD} & \textit{TBD} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The key implication for this thesis is that Phase~1 datasets are not expected to differentiate models by accuracy alone. Instead, the comparative analysis must focus on computational cost, training stability across seeds, and the consistency of graph-based versus implicit sequence modeling.
+
+\subsection{Human Activity Recognition on DSADS}
+
+The Daily and Sports Activities Dataset (DSADS) \citep{uci_dsa,altun2010har} provides a more challenging and structurally rich evaluation setting, with 45~channels from 5~body-worn sensor units, 19~activity classes, and 8~subjects. Table~\ref{tab:lit_dsads} summarizes published results.
+
+\begin{table}[htbp]
+\centering
+\caption{Published classification accuracies (\%) on the Daily and Sports Activities Dataset (DSADS). Note that evaluation protocol significantly affects reported accuracy.}
+\label{tab:lit_dsads}
+\small
+\begin{tabular}{@{}llcc@{}}
+\toprule
+\textbf{Reference} & \textbf{Technique} & \textbf{Protocol} & \textbf{Accuracy} \\
+\midrule
+\citet{altun2010har} & kNN, BDM, SVM & Controlled split & $\sim$95--98 \\
+\citet{zeng2014cnn} & CNN & Standard split & $\sim$90--95 \\
+\citet{ordonez2016deep} & DeepConvLSTM & Standard split & $\sim$92--96 \\
+\citet{wang2024cnnbigru} & CNN + BiGRU + Attention & 5-fold CV & $\sim$99.10 \\
+--- & Multi-branch BiGRU variants & Random CV & $\sim$99.55 \\
+\midrule
+This work & Sequence vs.\ TGNN benchmark & LOSO & \textit{TBD} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A critical methodological observation emerges from comparing evaluation protocols. Standard random cross-validation or controlled splits on DSADS typically report accuracies above 95\%, with modern deep models reaching 99\%+. However, as demonstrated by \citet{huynh2005evaluation}, random CV in HAR inflates accuracy by 10--16\% compared to subject-independent evaluation, because training and test samples from the same subject share distributional properties that do not generalize across individuals.
+
+This thesis therefore adopts Leave-One-Subject-Out (LOSO) cross-validation for Phase~2, which provides a more realistic estimate of model generalization. Under LOSO, a meaningful accuracy drop is expected compared to random-CV baselines. This drop is not a failure but a feature of rigorous evaluation: it exposes the real generalization challenge and enables meaningful differentiation between architectural families.
+
+The contribution of Phase~2 is not to match the 99\%+ accuracies reported under random CV, but to establish whether graph-based temporal models offer systematic advantages over sequence baselines under subject-independent evaluation. The richer sensor topology of DSADS (5~body segments $\times$ 9~axes) makes it the ideal setting to test whether predefined anatomical graph priors genuinely improve classification.
+
+\subsection{Graph Neural Networks for Structured Data}
+
+Graph neural networks (GNNs) extend deep learning to non-Euclidean domains by operating on graph-structured data. The foundational Graph Convolutional Network (GCN) of \citet{kipf2017gcn} introduced spectral-based graph convolutions for semi-supervised node classification. Graph Attention Networks (GATs) \citep{velickovic2018gat} refined this by learning attention-weighted aggregation over neighborhoods, enabling adaptive importance weighting without fixed structure assumptions.
+
+The GNN landscape has been systematically surveyed by \citet{wu2021gnnsurvey}, providing a taxonomy of spatial, spectral, and message-passing architectures. For temporal graph settings, where both node features and graph structure may evolve over time, specialized architectures combine recurrent or convolutional temporal encoders with graph message passing \citep{kazemi2020tgnnsurvey}. In our work, we adopt GConvLSTM and GConvGRU \citep{seo2018gcrn}, DCRNN \citep{li2018dcrnn}, and A3TGCN \citep{zhu2021a3tgcn} as representative temporal graph architectures spanning this design space. These models were originally developed for traffic forecasting on road networks; we evaluate their transferability to wearable MTSC where graph nodes represent sensor channels rather than road junctions.
+
+In the context of MTSC, \citet{yang2025benchmarkgnn} demonstrate that benchmarking conclusions for GNN classifiers shift substantially depending on node feature representation and edge construction. This finding directly motivates our controlled comparison of predefined versus adaptive graph construction under matched conditions. Application-specific evidence from biosignals further supports graph modeling: \citet{jia2020attentiongraphresnet} report strong gains from graph-aware architectures in EEG decoding where channel relations carry physical meaning. The recent TodyNet \citep{liu2024todynet} extends this to general MTSC, constructing temporal dynamic graphs with learned structure and achieving competitive results across the UEA archive.
+
+\subsection{Positioning of This Work}
+
+This thesis occupies a specific niche in the MTSC landscape:
+\begin{itemize}[leftmargin=*]
+  \item Unlike broad benchmark surveys \citep{ruiz2021bakeoff}, we focus on the specific question of whether explicit graph modeling helps in wearable HAR scenarios where sensor topology is physically meaningful.
+  \item Unlike architecture proposals \citep{liu2024todynet,zhang2020tapnet}, we do not introduce new model families but provide a controlled head-to-head comparison of existing ones under a standardized pipeline.
+  \item Unlike HAR studies reporting random-CV results \citep{wang2024cnnbigru}, we prioritize subject-independent evaluation (LOSO) that reflects real-world deployment conditions.
+  \item Our two-phase design (low-dimensional saturated $\to$ high-dimensional structured) tests whether graph modeling benefits scale with structural complexity---the central hypothesis of this work.
+\end{itemize}
+
+Table~\ref{tab:lit_gnn} summarizes the GNN foundation references used in this thesis.
+
+\begin{table}[htbp]
+\centering
+\caption{Graph neural network foundation references and their relevance to this work.}
+\label{tab:lit_gnn}
+\small
+\begin{tabular}{@{}llp{6.5cm}@{}}
+\toprule
+\textbf{Reference} & \textbf{Contribution} & \textbf{Relevance to This Thesis} \\
+\midrule
+\citet{kipf2017gcn} & Graph Convolutional Networks & Foundation for GConvLSTM/GConvGRU layers \\
+\citet{velickovic2018gat} & Graph Attention Networks & Attention-weighted graph aggregation \\
+\citet{wu2019graphwavenet} & Graph WaveNet & Adaptive graph learning paradigm \\
+\citet{wu2021gnnsurvey} & GNN taxonomy and survey & Theoretical positioning of TGNNs \\
+\citet{kazemi2020tgnnsurvey} & Temporal graph survey & Dynamic graph representation learning \\
+\citet{battaglia2018relational} & Relational inductive biases & Motivation for explicit structure modeling \\
+\citet{yang2025benchmarkgnn} & GNN benchmarking for MTSC & Direct methodological precedent \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\newpage
+\section{Methodology}
+\subsection{Problem Formulation}
+Given a multivariate sequence $X \in \mathbb{R}^{T \times C}$ with $T$ time steps and $C$ channels, the objective is to predict a class label $y \in \{1,\dots,K\}$. Sequence baselines process $X$ directly as a temporal channel matrix. TGNN variants map channels to graph nodes and use an adjacency matrix $A$ to encode inter-channel relations, where $A$ is either predefined from domain knowledge or learned adaptively during training.
+
+This thesis evaluates these alternatives under matched optimization settings to isolate architectural effects from training-protocol artifacts.
+
+\subsection{Model Families}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Sequence baselines:} LSTM, TCN, and Transformer classifiers.
+  \item \textbf{TGNN variants:} graph-temporal architectures with predefined and adaptive graph construction.
+\end{itemize}
+
+\subsection{Graph Construction Strategies}
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{0.22\textwidth}p{0.37\textwidth}p{0.36\textwidth}@{}}
+\toprule
+\textbf{Challenge} & \textbf{Option A} & \textbf{Option B} \\
+\midrule
+Graph structure & Predefined adjacency from anatomy/sensor colocations; interpretable, stable priors & Adaptive adjacency learned end-to-end; flexible, can discover hidden relations \\
+Temporal encoding & Recurrent encoders (LSTM/GRU-style) & Dilated temporal convolution or attention-based encoding \\
+Generalization target & Subject-independent splits for realistic transfer & Random/sample-level splits with higher risk of optimistic bias \\
+Efficiency vs capacity & Lightweight architectures with lower latency & Heavier TGNN variants with richer message passing \\
+\bottomrule
+\end{tabularx}
+\caption{Methodological options aligned with thesis challenges.}
+\end{table}
+
+
+\newpage
+\section{Experimental Setup and Results}
+\subsection{Datasets}
+\textbf{Phase 1 (lower structural complexity):}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{BasicMotions}: 6 dimensions, 4 classes, 40 train / 40 test \citep{uea_basicmotions}.
+  \item \textbf{Epilepsy}: 3 dimensions, 4 classes, 137 train / 138 test \citep{uea_epilepsy}.
+\end{itemize}
+In Phase 1, graph nodes correspond mostly to axes from a single wearable source, so structural priors are limited.
+
+\textbf{Phase 2 (higher structural complexity):}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{UCI Daily and Sports Activities}: 45 channels (5 units $\times$ 9 axes), 19 classes, 8 subjects, segmented windows \citep{uci_dsa}.
+\end{itemize}
+Phase 2 offers stronger anatomical structure, making predefined graph priors more meaningful.
+
+\subsection{Protocol}
+\begin{itemize}[leftmargin=*]
+  \item Standardized preprocessing: segmentation, normalization, and reproducible split definitions \citep{dau2019ucr}.
+  \item Controlled model comparison: same training budget, early stopping policy, and repeated seeds.
+  \item Metrics: accuracy, macro-F1, weighted-F1, parameter count, and wall-clock runtime.
+  \item Ablations: remove/replace graph components to isolate benefit sources.
+\end{itemize}
+
+% \subsection{Preliminary Phase 2 Results (In Progress)}
+% At the current stage of execution, the Phase 2 benchmark has produced complete DSA LSTM results for two random seeds (42 and 123), while additional seeds and model families are still running. The current snapshot is summarized in Table~\ref{tab:phase2_prelim_lstm}.
+
+% \begin{table}[h]
+% \centering
+% \small
+% \begin{tabular}{@{}lccc@{}}
+% \toprule
+% \textbf{Model} & \textbf{Seed} & \textbf{LOSO Accuracy} & \textbf{Runtime (s)} \\
+% \midrule
+% LSTM (DSA) & 42 & 0.7762 & 755.7 \\
+% LSTM (DSA) & 123 & 0.7486 & 649.9 \\
+% \bottomrule
+% \end{tabular}
+% \caption{Preliminary LOSO Phase 2 results from the currently completed DSA-LSTM runs.}
+% \label{tab:phase2_prelim_lstm}
+% \end{table}
+
+% Fold-level observations indicate substantial inter-subject variability, with test-fold accuracies ranging from approximately 0.63 to above 0.81 in the reported runs. This pattern is expected in subject-independent HAR, where distribution shift across individuals is often the dominant source of error \citep{altun2010har}. Importantly, these results are methodologically healthier than the near-ceiling outcomes observed in simpler datasets, because they better expose the true difficulty of generalization in high-dimensional wearable sensing tasks.
+
+% From an optimization perspective, repeated early stopping near the first few epochs in several folds suggests that validation-subject mismatch is strong and that model capacity may be high relative to fold-specific effective sample diversity. This does not indicate pipeline failure; rather, it reinforces the importance of reporting variability across folds and seeds under LOSO protocols \citep{dau2019ucr}.
+
+\subsection{Expected Contributions}
+\begin{enumerate}[leftmargin=*]
+  \item A reproducible benchmark pipeline for sequence vs TGNN models in wearable MTSC.
+  \item Empirical evidence on predefined vs adaptive graph strategies across two complexity regimes.
+  \item Practical guidance on when graph modeling is worth the computational overhead.
+\end{enumerate}
+
+
+\newpage
+\section{Conclusions and Future Directions}
+% The project has now progressed from conceptual framing to empirical evidence collection on the Phase 2 benchmark. The preliminary DSA results confirm that, unlike low-complexity benchmarks, subject-independent evaluation produces non-trivial error patterns and meaningful fold-to-fold variance. This is a desirable property for rigorous comparative analysis because it enables clearer differentiation between architectural choices.
+
+% At this stage, no definitive claim should be made about the overall superiority of TGNN versus sequence-only models. The scientifically sound position is to complete all scheduled runs, then evaluate performance, variance, and computational cost jointly before drawing final conclusions. This aligns with robust benchmarking practice in time-series learning \citep{dau2019ucr,yang2025benchmarkgnn}.
+
+Future directions after the core benchmark include:
+\begin{itemize}[leftmargin=*]
+  \item Statistical significance testing and confidence intervals across seeds and folds.
+  \item Robustness analysis under noisy or missing sensor channels.
+  \item Extension to cross-dataset transfer and subject adaptation.
+  \item Interpretability analysis of learned adaptive adjacency structures against predefined anatomical priors.
+\end{itemize}
+
+\newpage
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

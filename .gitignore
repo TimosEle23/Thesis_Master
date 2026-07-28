@@ -30,3 +30,5 @@ UCI/
 # Notebook and logs
 .ipynb_checkpoints/
 *.log
+thesis_colab.zip
+nohup.out

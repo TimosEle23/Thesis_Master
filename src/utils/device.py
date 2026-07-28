@@ -1,9 +1,41 @@
 """
 Device management utility.
-Selects the best available compute device (CUDA, MPS, or CPU).
+Selects the best available compute device (CUDA, MPS, or CPU) with
+graceful fallbacks when a requested accelerator is unavailable.
 """
 
+import logging
 import torch
+
+logger = logging.getLogger("thesis")
+
+
+def _cuda_available() -> bool:
+    """Robust CUDA availability check that tolerates missing drivers.
+
+    torch.cuda.is_available() can be True in some environments even when the
+    NVIDIA driver is not properly installed, which would crash at model.to().
+    We attempt a lightweight CUDA call and fall back to CPU on failure.
+    """
+    try:
+        if not torch.cuda.is_available():
+            return False
+        # Trigger lazy init to surface driver issues early
+        _ = torch.cuda.current_device()
+        _ = torch.cuda.get_device_name(0)
+        return True
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("CUDA reported available but initialization failed: %s. Using CPU.", exc)
+        return False
+
+
+def _mps_available() -> bool:
+    """Robust MPS availability check for Apple Silicon."""
+    try:
+        return hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("MPS check failed (%s). Using CPU.", exc)
+        return False
 
 
 def get_device(preference: str = "auto") -> torch.device:
@@ -16,14 +48,21 @@ def get_device(preference: str = "auto") -> torch.device:
         torch.device object.
     """
     if preference == "auto":
-        if torch.cuda.is_available():
+        if _cuda_available():
             device = torch.device("cuda")
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        elif _mps_available():
             device = torch.device("mps")
         else:
             device = torch.device("cpu")
     else:
-        device = torch.device(preference)
+        if preference == "cuda" and not _cuda_available():
+            logger.warning("Requested CUDA but no GPU detected; falling back to CPU.")
+            device = torch.device("cpu")
+        elif preference == "mps" and not _mps_available():
+            logger.warning("Requested MPS but it is unavailable; falling back to CPU.")
+            device = torch.device("cpu")
+        else:
+            device = torch.device(preference)
 
     return device
 

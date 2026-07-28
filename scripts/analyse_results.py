@@ -27,6 +27,7 @@ import matplotlib
 matplotlib.use("Agg")   # non-interactive backend
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.metrics import classification_report, confusion_matrix
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -152,15 +153,34 @@ def plot_f1_comparison(df: pd.DataFrame, output_dir: Path):
 
 
 def plot_confusion_matrices(results_dir: Path, output_dir: Path):
-    """Plot confusion matrices from saved .npy files."""
+    """Plot confusion matrices and save classification reports from saved labels."""
     cm_dir = output_dir / "confusion_matrices"
+    cr_dir = output_dir / "classification_reports"
     cm_dir.mkdir(exist_ok=True)
+    cr_dir.mkdir(exist_ok=True)
 
-    for exp_dir in sorted(results_dir.glob("**/confusion_matrix.npy")):
-        cm = np.load(exp_dir)
+    for exp_dir in sorted(results_dir.glob("**/predictions.npy")):
+        y_pred = np.load(exp_dir)
+        true_labels_path = exp_dir.parent / "true_labels.npy"
+        
+        if not true_labels_path.exists():
+            continue
+            
+        y_true = np.load(true_labels_path)
         name = exp_dir.parent.name
 
+        # Calculate using sklearn
+        cm = confusion_matrix(y_true, y_pred)
         n_classes = cm.shape[0]
+        
+        # Save Classification Report
+        report = classification_report(y_true, y_pred)
+        with open(cr_dir / f"report_{name}.txt", "w") as f:
+            f.write(f"Classification Report for: {name}\n")
+            f.write("="*50 + "\n")
+            f.write(report)
+
+        # Plot Confusion Matrix
         fig, ax = plt.subplots(figsize=(max(6, n_classes * 0.5), max(5, n_classes * 0.4)))
 
         # Normalise per row (per true class)
@@ -181,6 +201,7 @@ def plot_confusion_matrices(results_dir: Path, output_dir: Path):
         plt.close(fig)
 
     logger.info(f"Confusion matrices saved to {cm_dir}")
+    logger.info(f"Classification reports saved to {cr_dir}")
 
 
 # ── Training curves ───────────────────────────────────────────
