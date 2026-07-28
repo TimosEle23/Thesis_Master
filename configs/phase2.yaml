@@ -151,9 +151,14 @@ models_to_run:
   # plus the three correlation-mean variants (matches Phase 1 Family E)
 
   # Scheduling order only (does not change which experiments run — just
-  # front-loads these graph_modes across all TGNN models before the rest
-  # of graph_modes, so the new correlation-mean family finishes first).
+  # front-loads these graph_modes across all TGNN models before the rest).
+  # CORE-FIRST: finish the main coarse/fine/adaptive comparison (the remaining
+  # 19 adaptive + 12 predefined_fine jobs) before the 75 correlation-mean bonus
+  # jobs, so Phase 2's central result completes even on a limited GPU budget.
+  # adaptive is the small 5-node graph (fast); fine/correlation are 45-node.
   priority_graph_modes: [
+    "adaptive",
+    "predefined_fine",
     "predefined_correlation_mean",
     "adaptive_correlation_mean",
     "adaptive_nosvd_correlation_mean",
