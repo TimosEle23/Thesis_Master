@@ -142,9 +142,16 @@ def run_all(
             exp_name = f"{j['dataset']}_{j['model']}_{gm}_seed{j['seed']}"
             result_file = results_dir / exp_name / "results.json"
             if result_file.exists():
-                logger.info(f"  SKIP (exists): {exp_name}")
-                with open(result_file) as f:
-                    all_results.append(json.load(f))
+                # Tolerate empty/corrupt results.json (e.g. a truncated Drive
+                # upload): re-run that experiment instead of crashing the sweep.
+                try:
+                    with open(result_file) as f:
+                        data = json.load(f)
+                    all_results.append(data)
+                    logger.info(f"  SKIP (exists): {exp_name}")
+                except (json.JSONDecodeError, ValueError, OSError) as e:
+                    logger.warning(f"  RERUN (unreadable results.json: {e}): {exp_name}")
+                    pending.append(j)
             else:
                 pending.append(j)
 
