@@ -33,8 +33,28 @@ echo " Vast.ai Phase 2 runner — fine + correlation-mean, parallel=$PARALLEL"
 echo "==================================================================="
 
 echo "[1/4] Installing Python deps (image already has torch+cuda)..."
-pip install -q torch_geometric torch_geometric_temporal omegaconf aeon \
-    jsonargparse pyyaml scikit-learn seaborn 2>&1 | tail -2
+pip install -q torch_geometric omegaconf aeon jsonargparse pyyaml \
+    scikit-learn seaborn scipy six decorator networkx tqdm 2>&1 | tail -2
+# torch_geometric_temporal depends on torch-sparse / torch-scatter, whose wheels fail
+# to build against this torch. Install it WITHOUT them and stub torch_sparse — the models
+# used here (GConvLSTM/GConvGRU/DCRNN/A3TGCN/hybrid) never touch EvolveGCN/SparseTensor.
+pip install -q --no-deps torch_geometric_temporal 2>&1 | tail -1
+python3 - <<'PYSTUB'
+import site, os
+p = os.path.join(site.getsitepackages()[0], "torch_sparse")
+os.makedirs(p, exist_ok=True)
+with open(os.path.join(p, "__init__.py"), "w") as f:
+    f.write("try:\n    from torch_geometric.typing import SparseTensor\n"
+            "except Exception:\n    class SparseTensor:\n"
+            "        def __init__(self, *a, **k):\n            raise RuntimeError('torch_sparse stub')\n"
+            "__version__ = '0.0.0-stub'\n")
+print("  stubbed torch_sparse")
+PYSTUB
+echo "  verifying imports..."
+python3 -c "import torch, torch_geometric, torch_geometric_temporal, sklearn, omegaconf, aeon; \
+from torch_geometric_temporal.nn.recurrent import GConvLSTM, GConvGRU, DCRNN, A3TGCN; \
+print('  deps OK — torch', torch.__version__, '| cuda', torch.cuda.is_available())" \
+  || { echo "  ERROR: dependency import failed — aborting (not launching a broken sweep)."; exit 1; }
 
 echo "[2/4] Preparing DSA data (download from UCI + preprocess, ~5-10 min once)..."
 python3 - <<'PY'
