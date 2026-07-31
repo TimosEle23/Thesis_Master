@@ -83,15 +83,20 @@ PY
 echo "[3/4] Already-complete experiments present (will be skipped):"
 find results/phase2 -name results.json 2>/dev/null | wc -l | xargs echo "  results.json on disk:"
 
-echo "[4/4] Launching fine + correlation-mean sweep (parallel=$PARALLEL)..."
+echo "[4/4] Launching sweep — predefined_fine FIRST, then correlation-mean (parallel=$PARALLEL)..."
 # FORCE_NUM_WORKERS=0: cheap in-memory data -> main-process loading avoids worker
 # oversubscription when many experiments run at once.
-nohup env FORCE_NUM_WORKERS=0 python3 -u scripts/run_phase2_threaded.py \
-    --device cuda --parallel "$PARALLEL" \
-    --graph_modes predefined_fine predefined_correlation_mean \
-                  adaptive_correlation_mean adaptive_nosvd_correlation_mean \
-    >> logs/vastai_phase2.log 2>&1 &
-echo "  launched PID $! — monitor with:  tail -f logs/vastai_phase2.log"
+# Two chained calls so the unfinished predefined_fine runs complete before the
+# larger correlation-mean bonus family (run_phase2_threaded's own priority list
+# would otherwise put fine last).
+nohup bash -c "
+  env FORCE_NUM_WORKERS=0 python3 -u scripts/run_phase2_threaded.py \
+      --device cuda --parallel $PARALLEL --graph_modes predefined_fine
+  env FORCE_NUM_WORKERS=0 python3 -u scripts/run_phase2_threaded.py \
+      --device cuda --parallel $PARALLEL \
+      --graph_modes predefined_correlation_mean adaptive_correlation_mean adaptive_nosvd_correlation_mean
+" >> logs/vastai_phase2.log 2>&1 &
+echo "  launched PID $! — fine first, then correlation. monitor: tail -f logs/vastai_phase2.log"
 echo ""
 echo "Results land in results/phase2/. Download that folder (Jupyter file browser"
 echo "or scp) when done — the results.json + fold_*_results.json are what the"
